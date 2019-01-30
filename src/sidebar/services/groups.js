@@ -16,8 +16,8 @@ const { awaitStateChange } = require('../util/state-util');
 const serviceConfig = require('../service-config');
 
 // @ngInject
-function groups($rootScope, store, api, isSidebar, localStorage, serviceUrl, session,
-  settings) {
+function groups($rootScope, $q, store, api, isSidebar, localStorage, serviceUrl, session,
+  settings, features) {
   const svc = serviceConfig(settings);
   const authority = svc ? svc.authority : null;
 
@@ -137,9 +137,40 @@ function groups($rootScope, store, api, isSidebar, localStorage, serviceUrl, ses
         params.document_uri = uri;
       }
       documentUri = uri;
-
-      // Fetch groups from the API.
-      return api.groups.list(params, null, { includeMetadata: true });
+      
+      if (features.flagEnabled('community_groups')) {
+        return $q.all([api.profile.groups.read({expand: "organization"}),
+               api.groups.list(params, null, { includeMetadata: true })]
+        ).then(data => {
+          const myGroups = data[0];
+          const listGroups = data[1].data;
+          let groups = [];
+          var i;
+  
+          const myGroupIds = [];
+          for(var i=0; i<myGroups.length; ++i) {
+            myGroupIds.push(myGroups[i].id);
+            myGroups[i].groupList = "myGroups";
+          }
+  
+          const featuredGroups = [];
+          for(var i=0; i<listGroups.length; ++i) {
+            if (listGroups[i].id === '__world__') {
+              listGroups[i].groupList = "myGroups";
+              groups.push(listGroups[i]);
+            }
+            else if (myGroups.includes(listGroups[i].id)) {
+              featuredGroups.push(listGroups[i]);
+            }
+          }
+  
+          groups = groups.concat(myGroups).concat(featuredGroups)
+          return {data: groups, token: featuredGroups.token};
+        });
+      }else{
+        // Fetch groups from the API.
+        return api.groups.list(params, null, { includeMetadata: true });
+      }
     }).then(({ data, token }) => {
       const isLoggedIn = token !== null;
       const directLinkedAnnotation = settings.annotations;
